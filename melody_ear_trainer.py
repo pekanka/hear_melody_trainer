@@ -249,8 +249,8 @@ class Trainer(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Тренажёр слуха")
-        self.geometry("780x640")
-        self.minsize(700, 560)
+        self.geometry("780x700")
+        self.minsize(700, 670)
         self.configure(padx=22, pady=18)
         self.rng = random.Random()
         self.exercise: list[list[Event]] | None = None
@@ -263,10 +263,8 @@ class Trainer(tk.Tk):
         self.heading_var = tk.StringVar(value="Подбери мелодию на слух")
         self.description_var = tk.StringVar(value="Слушай, найди ноты на гитаре, затем открой ответ.")
         ttk.Label(self, textvariable=self.heading_var, font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(self, textvariable=self.description_var).pack(anchor="w", pady=(2, 16))
+        ttk.Label(self, textvariable=self.description_var).pack(anchor="w", pady=(2, 12))
 
-        settings = ttk.Frame(self)
-        settings.pack(fill="x")
         self.exercise_var = tk.StringVar(value="Мелодия")
         self.notation_var = tk.StringVar(value=NOTATION_OPTIONS[1])
         self.key_var = tk.StringVar(value="Случайная")
@@ -277,8 +275,22 @@ class Trainer(tk.Tk):
         self.level_var = tk.StringVar(value="Легко")
         self.chord_length_var = tk.StringVar(value=CHORD_LENGTH_OPTIONS[0])
 
+        mode_panel = ttk.LabelFrame(self, text="Что будем подбирать?", padding=(12, 7))
+        mode_panel.pack(fill="x", pady=(0, 10))
+        for column, (label, value) in enumerate(
+            (("Мелодию", "Мелодия"), ("Аккорды", "Аккорды"))
+        ):
+            ttk.Radiobutton(
+                mode_panel,
+                text=label,
+                variable=self.exercise_var,
+                value=value,
+                command=self._mode_changed,
+            ).grid(row=0, column=column, sticky="w", padx=(0, 28))
+
+        settings = ttk.LabelFrame(self, text="Настройки упражнения", padding=(12, 8))
+        settings.pack(fill="x")
         controls = [
-            ("Режим", self.exercise_var, ["Мелодия", "Аккорды"]),
             ("Названия нот", self.notation_var, NOTATION_OPTIONS),
             ("Тоника", self.key_var, ["Случайная", *NOTES_EN]),
             ("Лад", self.mode_var, ["мажор", "минор"]),
@@ -290,7 +302,7 @@ class Trainer(tk.Tk):
         ]
         for index, (label, variable, values) in enumerate(controls):
             row, column = divmod(index, 3)
-            cell = ttk.Frame(settings, padding=(0, 0, 15, 12))
+            cell = ttk.Frame(settings, padding=(0, 0, 15, 8))
             cell.grid(row=row, column=column, sticky="ew")
             ttk.Label(cell, text=label).pack(anchor="w")
             if values is None:
@@ -299,21 +311,19 @@ class Trainer(tk.Tk):
                 control = ttk.Combobox(cell, textvariable=variable, values=values, state="readonly", width=20)
             control.pack(fill="x", pady=(3, 0))
             if index == 0:
-                control.bind("<<ComboboxSelected>>", self._mode_changed)
-            elif index == 1:
                 control.bind("<<ComboboxSelected>>", self._notation_changed)
-            elif index == 2:
+            elif index == 1:
                 self.key_combo = control
-            elif index == 7:
+            elif index == 6:
                 self.level_combo = control
-            elif index == 8:
+            elif index == 7:
                 self.chord_length_combo = control
         for column in range(3):
             settings.columnconfigure(column, weight=1)
         self.chord_length_combo.configure(state="disabled")
 
         buttons = ttk.Frame(self)
-        buttons.pack(fill="x", pady=(5, 12))
+        buttons.pack(fill="x", pady=(3, 8))
         self.new_button = ttk.Button(buttons, text="Новая мелодия", command=self.generate)
         self.new_button.pack(side="left", padx=(0, 8))
         ttk.Button(buttons, text="▶ Слушать ещё", command=self.play).pack(side="left", padx=(0, 8))
@@ -322,7 +332,7 @@ class Trainer(tk.Tk):
 
         self.status_var = tk.StringVar(value="Выбери настройки и нажми «Новая мелодия».")
         ttk.Label(self, textvariable=self.status_var, wraplength=710).pack(anchor="w", pady=(0, 9))
-        self.answer = tk.Text(self, height=11, wrap="word", font=("Segoe UI", 11), padx=12, pady=10)
+        self.answer = tk.Text(self, height=8, wrap="word", font=("Segoe UI", 11), padx=12, pady=10)
         self.answer.pack(fill="both", expand=True)
         self._set_answer("Ответ пока скрыт.")
         self.hint_var = tk.StringVar(
