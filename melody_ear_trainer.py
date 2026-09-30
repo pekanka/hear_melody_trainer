@@ -249,6 +249,9 @@ class Trainer(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Тренажёр слуха")
+        icon_dir = Path(__file__).resolve().parent
+        # Windows сам выбирает подходящий размер из ICO для окна и панели задач.
+        self.iconbitmap(str(icon_dir / "logo.ico"))
         self.geometry("780x700")
         self.minsize(700, 670)
         self.configure(padx=22, pady=18)
