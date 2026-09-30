@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import random
 import struct
+import tempfile
 import tkinter as tk
 import uuid
 import wave
@@ -132,7 +133,7 @@ class Trainer(tk.Tk):
         self.rng = random.Random()
         self.exercise: list[list[Event]] | None = None
         self.actual_key: tuple[int, str] | None = None
-        self.audio_path = Path(__file__).parent / f".melody-ear-{uuid.uuid4().hex}.wav"
+        self.audio_path = Path(tempfile.gettempdir()) / f"melody-ear-{uuid.uuid4().hex}.wav"
 
         ttk.Label(self, text="Подбери мелодию на слух", font=("Segoe UI", 18, "bold")).pack(anchor="w")
         ttk.Label(self, text="Слушай, найди ноты на гитаре, затем открой ответ.").pack(anchor="w", pady=(2, 16))
