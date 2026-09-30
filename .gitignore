@@ -4,3 +4,7 @@ dist/
 *.spec
 melody-ear-*.wav
 *.psd
+.venv-build/
+.build-tmp/
+.build-cache/
+build-local.bat
