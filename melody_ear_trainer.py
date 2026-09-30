@@ -21,7 +21,17 @@ import winsound
 
 NOTES_RU = ("До", "До♯", "Ре", "Ре♯", "Ми", "Фа", "Фа♯", "Соль", "Соль♯", "Ля", "Ля♯", "Си")
 NOTES_EN = ("C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B")
-SCALES = {"мажор": (0, 2, 4, 5, 7, 9, 11), "минор": (0, 2, 3, 5, 7, 8, 10)}
+SCALES = {
+    "мажор": (0, 2, 4, 5, 7, 9, 11),       # ионийский
+    "дорийский": (0, 2, 3, 5, 7, 9, 10),
+    "фригийский": (0, 1, 3, 5, 7, 8, 10),
+    "лидийский": (0, 2, 4, 6, 7, 9, 11),
+    "миксолидийский": (0, 2, 4, 5, 7, 9, 10),
+    "минор": (0, 2, 3, 5, 7, 8, 10),       # эолийский
+    "локрийский": (0, 1, 3, 5, 6, 8, 10),
+}
+MELODY_MODES = tuple(SCALES)
+CHORD_MODES = ("мажор", "минор")
 NOTATION_OPTIONS = ("До–Ре–Ми", "C–D–E")
 CHORD_LENGTH_OPTIONS = ("Каждый такт", "Каждые 2 такта", "Случайно: 1–2 такта")
 SAMPLE_RATE = 22050
@@ -57,7 +67,7 @@ def make_exercise(
     tonic: int, mode: str, numerator: int, bars: int, level: str, rng: random.Random
 ) -> list[list[Event]]:
     """Создаёт такты, каждый из которых заполнен ровно до границы размера."""
-    if mode not in SCALES or numerator not in (2, 3, 4) or not 1 <= bars <= 16:
+    if not 0 <= tonic < 12 or mode not in SCALES or numerator not in (2, 3, 4) or not 1 <= bars <= 16:
         raise ValueError("Недопустимые параметры упражнения")
     if level not in ("Легко", "Обычно", "Сложнее"):
         raise ValueError("Недопустимая сложность")
@@ -65,8 +75,16 @@ def make_exercise(
     # Тоника находится в удобном для электрогитары регистре G3–F#4.
     anchor = (60 if tonic <= 6 else 48) + tonic
     scale = SCALES[mode]
-    max_degree = {"Легко": 4, "Обычно": 6, "Сложнее": 7}[level]
-    degrees = [anchor + scale[d] if d < 7 else anchor + 12 for d in range(max_degree + 1)]
+    if level == "Легко":
+        # Даже короткие упражнения могут затронуть характерную ступень лада.
+        selected_degrees = {
+            "дорийский": (0, 1, 2, 3, 5),
+            "миксолидийский": (0, 1, 2, 4, 6),
+        }.get(mode, (0, 1, 2, 3, 4))
+    else:
+        selected_degrees = tuple(range(7 if level == "Обычно" else 8))
+    degrees = [anchor + scale[d] if d < 7 else anchor + 12 for d in selected_degrees]
+    max_degree = len(degrees) - 1
     current = 0
     result: list[list[Event]] = []
 
@@ -101,7 +119,7 @@ def make_chord_exercise(
     tonic: int, mode: str, bars: int, chord_length: str, rng: random.Random
 ) -> list[ChordEvent]:
     """Собирает последовательность диатонических трезвучий целыми тактами."""
-    if not 0 <= tonic < 12 or mode not in SCALES or not 1 <= bars <= 16:
+    if not 0 <= tonic < 12 or mode not in CHORD_MODES or not 1 <= bars <= 16:
         raise ValueError("Недопустимые параметры упражнения")
     if chord_length not in CHORD_LENGTH_OPTIONS:
         raise ValueError("Недопустимая длительность аккорда")
@@ -272,6 +290,7 @@ class Trainer(tk.Tk):
         self.notation_var = tk.StringVar(value=NOTATION_OPTIONS[1])
         self.key_var = tk.StringVar(value="Случайная")
         self.mode_var = tk.StringVar(value="мажор")
+        self.last_melody_mode = "мажор"
         self.meter_var = tk.StringVar(value="4/4")
         self.bars_var = tk.StringVar(value="2")
         self.bpm_var = tk.StringVar(value="80")
@@ -296,7 +315,7 @@ class Trainer(tk.Tk):
         controls = [
             ("Названия нот", self.notation_var, NOTATION_OPTIONS),
             ("Тоника", self.key_var, ["Случайная", *NOTES_EN]),
-            ("Лад", self.mode_var, ["мажор", "минор"]),
+            ("Лад", self.mode_var, MELODY_MODES),
             ("Размер", self.meter_var, ["2/4", "3/4", "4/4"]),
             ("Тактов (1–16)", self.bars_var, None),
             ("Темп, BPM (40–240)", self.bpm_var, None),
@@ -317,6 +336,8 @@ class Trainer(tk.Tk):
                 control.bind("<<ComboboxSelected>>", self._notation_changed)
             elif index == 1:
                 self.key_combo = control
+            elif index == 2:
+                self.scale_combo = control
             elif index == 6:
                 self.level_combo = control
             elif index == 7:
@@ -359,6 +380,10 @@ class Trainer(tk.Tk):
         self.answer_visible = False
         self._set_answer("Ответ пока скрыт.")
         if self.exercise_var.get() == "Аккорды":
+            self.last_melody_mode = self.mode_var.get()
+            self.scale_combo.configure(values=CHORD_MODES)
+            if self.mode_var.get() not in CHORD_MODES:
+                self.mode_var.set("мажор")
             if self.bars_var.get() == "2":
                 self.bars_var.set("4")
             self.heading_var.set("Подбери аккорды на слух")
@@ -369,6 +394,8 @@ class Trainer(tk.Tk):
             self.hint_var.set("Звучат трезвучия в выбранном ладу. Каждый аккорд держится целый блок тактов; "
                               "перед началом звучит один такт счёта.")
         else:
+            self.scale_combo.configure(values=MELODY_MODES)
+            self.mode_var.set(self.last_melody_mode)
             self.heading_var.set("Подбери мелодию на слух")
             self.description_var.set("Слушай, найди ноты на гитаре, затем открой ответ.")
             self.new_button.configure(text="Новая мелодия")
