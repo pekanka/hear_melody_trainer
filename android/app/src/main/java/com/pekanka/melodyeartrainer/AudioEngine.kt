@@ -15,6 +15,7 @@ object AudioEngine {
     const val SAMPLE_RATE = 22_050
 
     fun render(exercise: Exercise): ShortArray {
+        if (exercise.settings.type == ExerciseType.BOTH) return renderCombined(exercise)
         val beatSeconds = 60.0 / exercise.settings.bpm
         val clicks = exercise.settings.meter * frameCount(beatSeconds)
         val music = if (exercise.settings.type == ExerciseType.MELODY) {
@@ -41,6 +42,53 @@ object AudioEngine {
             }
         }
         return samples
+    }
+
+    private fun renderCombined(exercise: Exercise): ShortArray {
+        val beatSeconds = 60.0 / exercise.settings.bpm
+        val barFrames = frameCount(exercise.settings.meter * beatSeconds)
+        val countInFrames = exercise.settings.meter * frameCount(beatSeconds)
+        val music = IntArray(exercise.settings.bars * barFrames)
+
+        fun add(segment: ShortArray, start: Int, gain: Double) {
+            for (index in segment.indices) {
+                val position = start + index
+                if (position >= music.size) break
+                music[position] += (segment[index] * gain).toInt()
+            }
+        }
+
+        var firstBar = 0
+        exercise.chords.forEach { chord ->
+            val duration = chord.bars * exercise.settings.meter * beatSeconds
+            val segment = ShortArray(frameCount(duration))
+            chordTone(segment, 0, chord.midis, duration)
+            add(segment, firstBar * barFrames, 0.6)
+            firstBar += chord.bars
+        }
+        exercise.melody.forEachIndexed { barIndex, bar ->
+            var elapsedEighths = 0
+            bar.forEach { event ->
+                val seconds = event.eighths * beatSeconds / 2
+                val segment = ShortArray(frameCount(seconds))
+                tone(segment, 0, frequency(event.midi), seconds * 0.88, seconds, 0.42)
+                val start = barIndex * barFrames + frameCount(elapsedEighths * beatSeconds / 2)
+                add(segment, start, 0.9)
+                elapsedEighths += event.eighths
+            }
+        }
+
+        val result = ShortArray(countInFrames + music.size)
+        var offset = 0
+        repeat(exercise.settings.meter) {
+            offset = tone(result, offset, 880.0, beatSeconds * 0.17, beatSeconds, 0.14)
+        }
+        music.forEachIndexed { index, sample ->
+            result[countInFrames + index] = sample.coerceIn(
+                Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()
+            ).toShort()
+        }
+        return result
     }
 
     private fun frameCount(seconds: Double): Int = (seconds * SAMPLE_RATE).toInt()

@@ -3,7 +3,9 @@ package com.pekanka.melodyeartrainer
 import java.util.Random
 import kotlin.math.abs
 
-enum class ExerciseType(val label: String) { MELODY("Мелодия"), CHORDS("Аккорды") }
+enum class ExerciseType(val label: String) {
+    MELODY("Мелодия"), CHORDS("Аккорды"), BOTH("Аккорды + мелодия")
+}
 enum class Notation(val label: String) { LATIN("C–D–E"), RUSSIAN("До–Ре–Ми") }
 enum class Difficulty(val label: String) { EASY("Легко"), NORMAL("Обычно"), HARD("Сложнее") }
 enum class ChordLength(val label: String) {
@@ -54,14 +56,18 @@ object ExerciseEngine {
         require(settings.meter in 2..4) { "Размер должен быть 2/4, 3/4 или 4/4" }
         require(settings.bars in 1..16) { "Количество тактов должно быть от 1 до 16" }
         require(settings.bpm in 40..240) { "BPM должен быть от 40 до 240" }
-        require(settings.type != ExerciseType.CHORDS || settings.scale in Scale.chordModes) {
+        require(settings.type == ExerciseType.MELODY || settings.scale in Scale.chordModes) {
             "Для аккордов доступны только мажор и минор"
         }
         val tonic = settings.tonic ?: random.nextInt(12)
-        return if (settings.type == ExerciseType.MELODY) {
-            Exercise(settings, tonic, melody = makeMelody(tonic, settings, random))
-        } else {
-            Exercise(settings, tonic, chords = makeChords(tonic, settings, random))
+        return when (settings.type) {
+            ExerciseType.MELODY -> Exercise(settings, tonic, melody = makeMelody(tonic, settings, random))
+            ExerciseType.CHORDS -> Exercise(settings, tonic, chords = makeChords(tonic, settings, random))
+            ExerciseType.BOTH -> {
+                val chords = makeChords(tonic, settings, random)
+                Exercise(settings, tonic,
+                    melody = makeAccompaniedMelody(tonic, settings, chords, random), chords = chords)
+            }
         }
     }
 
@@ -136,6 +142,44 @@ object ExerciseEngine {
         }
     }
 
+    private fun makeAccompaniedMelody(
+        tonic: Int, settings: ExerciseSettings, chords: List<ChordEvent>, random: Random,
+    ): List<List<NoteEvent>> {
+        val rhythm = makeMelody(tonic, settings, random)
+        val activeChords = chords.flatMap { chord -> List(chord.bars) { chord } }
+        val anchor = (if (tonic <= 6) 60 else 48) + tonic
+        var current = 0
+        return rhythm.mapIndexed { barIndex, bar ->
+            val chord = activeChords[barIndex]
+            val chordDegrees = listOf(0, 2, 4).map { (chord.degree + it) % 7 }.toSet()
+            var elapsed = 0
+            bar.mapIndexed { eventIndex, event ->
+                val final = barIndex == rhythm.lastIndex && eventIndex == bar.lastIndex
+                var options = when {
+                    final && chord.degree == 0 -> listOf(0)
+                    final || elapsed % 2 == 0 -> (0..7).filter { it % 7 in chordDegrees }
+                    else -> (0..7).toList()
+                }
+                val reach = when (settings.difficulty) {
+                    Difficulty.EASY -> 2
+                    Difficulty.NORMAL -> 3
+                    Difficulty.HARD -> 4
+                }
+                val nearby = options.filter { abs(it - current) <= reach }
+                if (nearby.isNotEmpty()) options = nearby
+                val weights = options.map { degree ->
+                    val distance = abs(degree - current)
+                    val stepWeight = when (distance) { 1 -> 4; 0 -> 2; else -> 1 }
+                    stepWeight * if (degree % 7 in chordDegrees) 3 else 1
+                }
+                current = options[weightedIndex(weights, random)]
+                elapsed += event.eighths
+                val midi = anchor + if (current == 7) 12 else settings.scale.steps[current]
+                NoteEvent(midi, event.eighths)
+            }
+        }
+    }
+
     private fun weightedIndex(weights: List<Int>, random: Random): Int {
         var selection = random.nextInt(weights.sum())
         weights.forEachIndexed { index, weight ->
@@ -161,16 +205,8 @@ object ExerciseEngine {
     fun answer(exercise: Exercise, notation: Notation): String = buildString {
         appendLine("Тональность: ${pitchName(exercise.tonic, notation)} ${exercise.settings.scale.label}")
         appendLine()
-        if (exercise.settings.type == ExerciseType.MELODY) {
-            exercise.melody.forEachIndexed { index, bar ->
-                append("Такт ${index + 1}:  ")
-                appendLine(bar.joinToString("   ") { event ->
-                    val duration = when (event.eighths) { 1 -> "⅛"; 2 -> "¼"; else -> "½" }
-                    "${noteName(event.midi, notation)} ($duration)"
-                })
-            }
-            append("\n⅛ — восьмая, ¼ — четверть, ½ — половина. Октава указана после названия ноты.")
-        } else {
+        if (exercise.settings.type == ExerciseType.BOTH) appendLine("Аккорды:\n")
+        if (exercise.settings.type != ExerciseType.MELODY) {
             var barNumber = 1
             exercise.chords.forEach { chord ->
                 val quality = chordQuality(chord.midis)
@@ -188,6 +224,17 @@ object ExerciseEngine {
                 barNumber += chord.bars
             }
             append("\nСтупень указана римской цифрой; «°» означает уменьшённое трезвучие.")
+        }
+        if (exercise.settings.type == ExerciseType.BOTH) append("\n\nМелодия:\n\n")
+        if (exercise.settings.type != ExerciseType.CHORDS) {
+            exercise.melody.forEachIndexed { index, bar ->
+                append("Такт ${index + 1}:  ")
+                appendLine(bar.joinToString("   ") { event ->
+                    val duration = when (event.eighths) { 1 -> "⅛"; 2 -> "¼"; else -> "½" }
+                    "${noteName(event.midi, notation)} ($duration)"
+                })
+            }
+            append("\n⅛ — восьмая, ¼ — четверть, ½ — половина. Октава указана после названия ноты.")
         }
     }
 }

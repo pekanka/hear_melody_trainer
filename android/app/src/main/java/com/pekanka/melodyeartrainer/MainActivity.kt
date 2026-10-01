@@ -87,8 +87,8 @@ private fun TrainerScreen() {
         answerVisible = false
         busy = false
         message = "Выбери настройки и создай новое упражнение."
-        if (newType == ExerciseType.CHORDS) {
-            lastMelodyScale = scale
+        if (type == ExerciseType.MELODY) lastMelodyScale = scale
+        if (newType != ExerciseType.MELODY) {
             if (scale !in Scale.chordModes) scale = Scale.MAJOR
             if (barsText == "2") barsText = "4"
         } else {
@@ -106,15 +106,16 @@ private fun TrainerScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Тренажёр слуха", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            if (type == ExerciseType.MELODY) "Слушай и подбери мелодию на гитаре."
-            else "Слушай последовательность и подбери аккорды на гитаре."
-        )
+        Text(when (type) {
+            ExerciseType.MELODY -> "Слушай и подбери мелодию на гитаре."
+            ExerciseType.CHORDS -> "Слушай последовательность и подбери аккорды на гитаре."
+            ExerciseType.BOTH -> "Слушай две партии одновременно и подбери их на гитаре."
+        })
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp)) {
                 Text("Что будем подбирать?", style = MaterialTheme.typography.titleMedium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Column {
                     ExerciseType.entries.forEach { option ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(selected = type == option, onClick = { changeType(option) })
@@ -147,11 +148,12 @@ private fun TrainerScreen() {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (type == ExerciseType.MELODY) {
+                if (type != ExerciseType.CHORDS) {
                     ChoiceField("Сложность", difficulty.label, Difficulty.entries.map { it.label }) {
                         difficulty = Difficulty.entries[it]
                     }
-                } else {
+                }
+                if (type != ExerciseType.MELODY) {
                     ChoiceField("Смена аккордов", chordLength.label, ChordLength.entries.map { it.label }) {
                         chordLength = ChordLength.entries[it]
                     }
@@ -186,9 +188,11 @@ private fun TrainerScreen() {
                             samples = rendered
                             answerVisible = false
                             busy = false
-                            message = if (type == ExerciseType.MELODY)
-                                "Ответ скрыт. Попробуй напеть мелодию и найти её на гитаре."
-                            else "Ответ скрыт. Попробуй услышать бас и качество каждого аккорда."
+                            message = when (generated.settings.type) {
+                                ExerciseType.MELODY -> "Ответ скрыт. Попробуй напеть мелодию и найти её на гитаре."
+                                ExerciseType.CHORDS -> "Ответ скрыт. Попробуй услышать бас и качество каждого аккорда."
+                                ExerciseType.BOTH -> "Ответ скрыт. Попробуй сначала услышать аккорды, затем мелодию."
+                            }
                             player.play(rendered) { message = it }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -201,7 +205,11 @@ private fun TrainerScreen() {
             },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (type == ExerciseType.MELODY) "Новая мелодия" else "Новые аккорды") }
+        ) { Text(when (type) {
+            ExerciseType.MELODY -> "Новая мелодия"
+            ExerciseType.CHORDS -> "Новые аккорды"
+            ExerciseType.BOTH -> "Новое упражнение"
+        }) }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = {
@@ -233,9 +241,11 @@ private fun TrainerScreen() {
             )
         }
         Text(
-            if (type == ExerciseType.MELODY)
-                "Легко: до 5 ступеней, четверти и половины. Обычно: до 7 ступеней и восьмые. Перед мелодией звучит такт счёта."
-            else "Звучат трезвучия в выбранном ладу. Каждый аккорд держится целый блок тактов; перед началом звучит такт счёта.",
+            when (type) {
+                ExerciseType.MELODY -> "Легко: до 5 ступеней, четверти и половины. Обычно: до 7 ступеней и восьмые. Перед мелодией звучит такт счёта."
+                ExerciseType.CHORDS -> "Звучат трезвучия в выбранном ладу. Каждый аккорд держится целый блок тактов; перед началом звучит такт счёта."
+                ExerciseType.BOTH -> "Мелодия опирается на ноты текущего аккорда на сильных долях. Перед обеими партиями звучит такт счёта."
+            },
             style = MaterialTheme.typography.bodySmall,
         )
     }
