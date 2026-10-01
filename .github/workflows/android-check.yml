@@ -3,7 +3,7 @@ name: Build Android preview
 on:
   workflow_dispatch:
   push:
-    branches: [main, indev]
+    branches: [indev]
     paths:
       - "android/**"
       - ".github/workflows/android-check.yml"

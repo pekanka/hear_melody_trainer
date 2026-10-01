@@ -28,7 +28,7 @@ python melody_ear_trainer.py
 
 Откройте папку `android/` как проект в Android Studio. После установки Android SDK 35 выберите эмулятор или подключённый телефон и нажмите **Run**. Для установки на телефон без Android Studio соберите `app-debug.apk` через **Build → Build APK(s)**.
 
-Если Android Studio пока нет, после отправки изменений в ветку `indev` или `main` откройте вкладку **Actions → Build Android preview**. В завершённом запуске скачайте артефакт `MelodyEarTrainer-android-preview`: внутри будет тестовый APK. Рабочий процесс также запускается вручную через **Run workflow**.
+Если Android Studio пока нет, после отправки изменений в ветку `indev` откройте вкладку **Actions → Build Android preview**. В завершённом запуске скачайте артефакт `MelodyEarTrainer-android-preview`: внутри будет тестовый APK. Рабочий процесс также запускается вручную через **Run workflow**. Обычный push в `main` тестовую Android-сборку не запускает.
 
 При отправке нового тега `v*` процесс **Build Windows and Android release** собирает оба приложения из одного и того же тега и прикрепляет `MelodyEarTrainer.exe` и `MelodyEarTrainer-android-preview.apk` к одному релизу GitHub. Релиз публикуется только после успешной сборки обеих версий. Сначала отправьте коммит с изменениями, а затем создайте и отправьте новый тег на этот коммит.
 
