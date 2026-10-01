@@ -3,7 +3,7 @@ name: Build Android preview
 on:
   workflow_dispatch:
   push:
-    branches: [main, indev]
+    branches: [indev]
     paths:
       - "android/**"
       - ".github/workflows/android-check.yml"
@@ -14,23 +14,31 @@ on:
 
 jobs:
   android-preview:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
-      - name: Install Android SDK
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          accept-android-sdk-licenses: false
+          packages: ''
+      - name: Accept licenses and install Android SDK
+        run: |
+          # yes exits with SIGPIPE after sdkmanager finishes reading its answers.
+          set +o pipefail
+          yes | sdkmanager --licenses > /dev/null
+          set -o pipefail
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v6
       - name: Test and build APK
         working-directory: android
         run: bash ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: MelodyEarTrainer-android-preview
           path: android/app/build/outputs/apk/debug/app-debug.apk
