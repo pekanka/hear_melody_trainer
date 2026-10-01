@@ -1,4 +1,5 @@
 __pycache__/
+tests/tmp*/
 build/
 dist/
 *.spec
@@ -8,3 +9,9 @@ melody-ear-*.wav
 .build-tmp/
 .build-cache/
 build-local.bat
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/.idea/
+android/*.iml
+android/app/*.iml

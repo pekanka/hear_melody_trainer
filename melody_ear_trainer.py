@@ -13,9 +13,11 @@ import tempfile
 import tkinter as tk
 import uuid
 import wave
+from array import array
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
+from typing import BinaryIO
 import winsound
 
 
@@ -165,6 +167,50 @@ def make_chord_exercise(
     return result
 
 
+def make_accompanied_melody(
+    tonic: int, mode: str, numerator: int, bars: int, level: str,
+    chords: list[ChordEvent], rng: random.Random,
+) -> list[list[Event]]:
+    """Строит мелодию в ладу с опорой на звуки аккорда на сильных долях."""
+    if mode not in CHORD_MODES or sum(chord.bars for chord in chords) != bars:
+        raise ValueError("Аккорды не соответствуют мелодии")
+    # Используем те же длительности, что в самостоятельном упражнении.
+    rhythm = make_exercise(tonic, mode, numerator, bars, level, rng)
+    anchor = (60 if tonic <= 6 else 48) + tonic
+    scale = SCALES[mode]
+    active_chords = [chord for chord in chords for _ in range(chord.bars)]
+    current = 0
+    result: list[list[Event]] = []
+    for bar_index, bar in enumerate(rhythm):
+        chord = active_chords[bar_index]
+        chord_degrees = {(chord.degree + step) % 7 for step in (0, 2, 4)}
+        elapsed = 0
+        arranged: list[Event] = []
+        for event_index, event in enumerate(bar):
+            final = bar_index == bars - 1 and event_index == len(bar) - 1
+            if final and chord.degree == 0:
+                options = [0]
+            elif final or elapsed % 2 == 0:
+                options = [degree for degree in range(8) if degree % 7 in chord_degrees]
+            else:
+                options = list(range(8))
+            reach = {"Легко": 2, "Обычно": 3, "Сложнее": 4}[level]
+            nearby = [degree for degree in options if abs(degree - current) <= reach]
+            if nearby:
+                options = nearby
+            weights = [
+                (4 if abs(degree - current) == 1 else 2 if degree == current else 1)
+                * (3 if degree % 7 in chord_degrees else 1)
+                for degree in options
+            ]
+            current = rng.choices(options, weights=weights, k=1)[0]
+            midi = anchor + (scale[current] if current < 7 else 12)
+            arranged.append(Event(midi, event.eighths))
+            elapsed += event.eighths
+        result.append(arranged)
+    return result
+
+
 def chord_quality(midis: tuple[int, int, int]) -> str:
     intervals = (midis[1] - midis[0], midis[2] - midis[0])
     return {(4, 7): "major", (3, 7): "minor", (3, 6): "diminished"}[intervals]
@@ -209,6 +255,50 @@ def make_chord_wav(path: Path, exercise: list[ChordEvent], bpm: int, numerator: 
         frames.extend(_chord_tone(chord.midis, duration))
 
     with wave.open(str(path), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(SAMPLE_RATE)
+        output.writeframes(frames)
+
+
+def make_combined_wav(
+    path: Path | BinaryIO, melody: list[list[Event]], chords: list[ChordEvent], bpm: int, numerator: int,
+) -> None:
+    """Смешивает обе партии по общей сетке тактов после одного такта счёта."""
+    if sum(chord.bars for chord in chords) != len(melody):
+        raise ValueError("Аккорды не соответствуют мелодии")
+    beat_seconds = 60.0 / bpm
+    bar_samples = int(numerator * beat_seconds * SAMPLE_RATE)
+    music = array("i", [0]) * (len(melody) * bar_samples)
+
+    def add_sound(sound: bytes, start_sample: int, volume: float) -> None:
+        for offset, (sample,) in enumerate(struct.iter_unpack("<h", sound)):
+            position = start_sample + offset
+            if position >= len(music):
+                break
+            music[position] += int(sample * volume)
+
+    bar_number = 0
+    for chord in chords:
+        add_sound(_chord_tone(chord.midis, chord.bars * numerator * beat_seconds),
+                  bar_number * bar_samples, 0.6)
+        bar_number += chord.bars
+    for bar_number, bar in enumerate(melody):
+        elapsed_eighths = 0
+        for event in bar:
+            seconds = event.eighths * beat_seconds / 2
+            frequency = 440.0 * 2 ** ((event.midi - 69) / 12)
+            start = bar_number * bar_samples + int(elapsed_eighths * beat_seconds * SAMPLE_RATE / 2)
+            add_sound(_tone(frequency, seconds * 0.88, seconds, 0.42), start, 0.9)
+            elapsed_eighths += event.eighths
+
+    frames = bytearray()
+    for _ in range(numerator):
+        frames.extend(_tone(880, beat_seconds * 0.17, beat_seconds, 0.14))
+    for sample in music:
+        frames.extend(struct.pack("<h", max(-32768, min(32767, sample))))
+    # wave.open в Python 3.10–3.11 не принимает pathlib.Path напрямую.
+    with wave.open(str(path) if isinstance(path, Path) else path, "wb") as output:
         output.setnchannels(1)
         output.setsampwidth(2)
         output.setframerate(SAMPLE_RATE)
@@ -291,6 +381,7 @@ class Trainer(tk.Tk):
         self.key_var = tk.StringVar(value="Случайная")
         self.mode_var = tk.StringVar(value="мажор")
         self.last_melody_mode = "мажор"
+        self.previous_exercise_mode = "Мелодия"
         self.meter_var = tk.StringVar(value="4/4")
         self.bars_var = tk.StringVar(value="2")
         self.bpm_var = tk.StringVar(value="80")
@@ -300,7 +391,8 @@ class Trainer(tk.Tk):
         mode_panel = ttk.LabelFrame(self, text="Что будем подбирать?", padding=(12, 7))
         mode_panel.pack(fill="x", pady=(0, 10))
         for column, (label, value) in enumerate(
-            (("Мелодию", "Мелодия"), ("Аккорды", "Аккорды"))
+            (("Мелодию", "Мелодия"), ("Аккорды", "Аккорды"),
+             ("Аккорды + мелодию", "Вместе"))
         ):
             ttk.Radiobutton(
                 mode_panel,
@@ -379,30 +471,43 @@ class Trainer(tk.Tk):
         self.actual_key = None
         self.answer_visible = False
         self._set_answer("Ответ пока скрыт.")
-        if self.exercise_var.get() == "Аккорды":
+        selected = self.exercise_var.get()
+        if self.previous_exercise_mode == "Мелодия":
             self.last_melody_mode = self.mode_var.get()
+        if selected in ("Аккорды", "Вместе"):
             self.scale_combo.configure(values=CHORD_MODES)
             if self.mode_var.get() not in CHORD_MODES:
                 self.mode_var.set("мажор")
             if self.bars_var.get() == "2":
                 self.bars_var.set("4")
+            self.chord_length_combo.configure(state="readonly")
+        else:
+            self.scale_combo.configure(values=MELODY_MODES)
+            self.mode_var.set(self.last_melody_mode)
+            self.chord_length_combo.configure(state="disabled")
+
+        if selected == "Аккорды":
             self.heading_var.set("Подбери аккорды на слух")
             self.description_var.set("Слушай последовательность и найди аккорды на гитаре.")
             self.new_button.configure(text="Новые аккорды")
             self.level_combo.configure(state="disabled")
-            self.chord_length_combo.configure(state="readonly")
             self.hint_var.set("Звучат трезвучия в выбранном ладу. Каждый аккорд держится целый блок тактов; "
                               "перед началом звучит один такт счёта.")
+        elif selected == "Вместе":
+            self.heading_var.set("Подбери аккорды и мелодию")
+            self.description_var.set("Слушай две партии одновременно и подбери их на гитаре.")
+            self.new_button.configure(text="Новое упражнение")
+            self.level_combo.configure(state="readonly")
+            self.hint_var.set("Мелодия опирается на ноты текущего аккорда на сильных долях. "
+                              "Перед обеими партиями звучит один такт счёта.")
         else:
-            self.scale_combo.configure(values=MELODY_MODES)
-            self.mode_var.set(self.last_melody_mode)
             self.heading_var.set("Подбери мелодию на слух")
             self.description_var.set("Слушай, найди ноты на гитаре, затем открой ответ.")
             self.new_button.configure(text="Новая мелодия")
             self.level_combo.configure(state="readonly")
-            self.chord_length_combo.configure(state="disabled")
             self.hint_var.set("Легко: до 5 ступеней, четверти и половины. Обычно: до 7 ступеней и восьмые. "
                               "Перед мелодией звучит один такт счётных щелчков.")
+        self.previous_exercise_mode = selected
         self.status_var.set("Выбери настройки и создай новое упражнение.")
 
     def _notation_changed(self, _event: object = None) -> None:
@@ -421,9 +526,10 @@ class Trainer(tk.Tk):
         key_hint = "Тональность скрыта" if self.random_key and not self.answer_visible else (
             f"{pitch_name(tonic, self.notation_var.get())} {mode}"
         )
-        category = "аккорды" if self.chords is not None else "мелодия"
+        category = {"Мелодия": "Мелодия", "Аккорды": "Аккорды",
+                    "Вместе": "Аккорды + мелодия"}[self.exercise_var.get()]
         self.status_var.set(
-            f"{category.capitalize()} · {key_hint} · {self.meter_var.get()} · "
+            f"{category} · {key_hint} · {self.meter_var.get()} · "
             f"{self.bars_var.get()} такт(ов) · {self.bpm_var.get()} ударов/мин"
         )
 
@@ -452,6 +558,13 @@ class Trainer(tk.Tk):
                 make_chord_wav(self.audio_path, self.chords, bpm, meter)
                 self.exercise = None
                 self._set_answer("Ответ пока скрыт. Попробуй услышать басовую ноту и качество каждого аккорда.")
+            elif self.exercise_var.get() == "Вместе":
+                self.chords = make_chord_exercise(tonic, mode, bars, self.chord_length_var.get(), self.rng)
+                self.exercise = make_accompanied_melody(
+                    tonic, mode, meter, bars, self.level_var.get(), self.chords, self.rng
+                )
+                make_combined_wav(self.audio_path, self.exercise, self.chords, bpm, meter)
+                self._set_answer("Ответ пока скрыт. Попробуй сначала услышать аккорды, затем мелодию.")
             else:
                 self.exercise = make_exercise(tonic, mode, meter, bars, self.level_var.get(), self.rng)
                 make_wav(self.audio_path, self.exercise, bpm, meter)
@@ -463,6 +576,9 @@ class Trainer(tk.Tk):
             self.play()
         except (ValueError, OSError, KeyError) as error:
             messagebox.showerror("Не получилось создать упражнение", str(error))
+        except Exception as error:
+            # В pythonw.exe у Tkinter нет видимой консоли для ошибок обработчиков кнопок.
+            messagebox.showerror("Ошибка приложения", f"Не получилось создать упражнение: {error}")
 
     def play(self) -> None:
         if self.exercise is None and self.chords is None:
@@ -481,6 +597,8 @@ class Trainer(tk.Tk):
         notation = self.notation_var.get()
         lines = [f"Тональность: {pitch_name(tonic, notation)} {mode}", ""]
         if self.chords is not None:
+            if self.exercise is not None:
+                lines.extend(["Аккорды:", ""])
             bar_number = 1
             for chord in self.chords:
                 quality = chord_quality(chord.midis)
@@ -494,7 +612,9 @@ class Trainer(tk.Tk):
                 lines.append(f"Такт(ы) {bar_label}:  {roman} · {chord_name(chord, notation)} · {tones}")
                 bar_number += chord.bars
             lines.extend(["", "Ступень указана римской цифрой; «°» означает уменьшённое трезвучие."])
-        else:
+        if self.exercise is not None:
+            if self.chords is not None:
+                lines.extend(["", "Мелодия:", ""])
             for number, bar in enumerate(self.exercise or [], start=1):
                 notes = "   ".join(f"{note_name(event.midi, notation)} ({duration_name(event.eighths)})" for event in bar)
                 lines.append(f"Такт {number}:  {notes}")
