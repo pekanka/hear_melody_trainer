@@ -1,4 +1,4 @@
-name: Build Windows release
+name: Build Windows and Android release
 
 on:
   push:
@@ -6,13 +6,15 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -27,8 +29,65 @@ jobs:
           --add-data "logo.ico:."
           melody_ear_trainer.py
 
+      - uses: actions/upload-artifact@v6
+        with:
+          name: windows-executable
+          path: dist/MelodyEarTrainer.exe
+          if-no-files-found: error
+
+  build-android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v4
+        with:
+          accept-android-sdk-licenses: false
+          packages: ''
+      - name: Accept licenses and install Android SDK
+        run: |
+          # yes exits with SIGPIPE after sdkmanager finishes reading its answers.
+          set +o pipefail
+          yes | sdkmanager --licenses > /dev/null
+          set -o pipefail
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Test and build APK
+        working-directory: android
+        run: bash ./gradlew :app:testDebugUnitTest :app:assembleDebug "-PreleaseVersion=${GITHUB_REF_NAME#v}" --stacktrace
+      - uses: actions/upload-artifact@v6
+        with:
+          name: android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  publish-release:
+    needs: [build-windows, build-android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          name: windows-executable
+          path: release-files
+      - uses: actions/download-artifact@v7
+        with:
+          name: android-apk
+          path: release-files
       - name: Publish release
-        run: gh release create "$env:RELEASE_TAG" "dist/MelodyEarTrainer.exe" --generate-notes --verify-tag
+        run: |
+          mv release-files/app-debug.apk release-files/MelodyEarTrainer-android-preview.apk
+          gh release create "$RELEASE_TAG" \
+            release-files/MelodyEarTrainer.exe \
+            release-files/MelodyEarTrainer-android-preview.apk \
+            --generate-notes --verify-tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
