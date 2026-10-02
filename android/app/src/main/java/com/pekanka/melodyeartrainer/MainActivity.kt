@@ -6,14 +6,15 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -99,155 +100,176 @@ private fun TrainerScreen() {
 
     val tonicNames = if (notation == Notation.LATIN) ExerciseEngine.latinNotes else ExerciseEngine.russianNotes
     val scaleOptions = if (type == ExerciseType.MELODY) Scale.entries else Scale.chordModes
+    val exercise = current
+    val answerText = remember(exercise, notation, answerVisible) {
+        if (answerVisible && exercise != null) ExerciseEngine.answer(exercise, notation)
+        else "Ответ пока скрыт."
+    }
 
-    Column(
-        modifier = Modifier.fillMaxSize().systemBarsPadding().imePadding()
-            .verticalScroll(rememberScrollState()).padding(16.dp),
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().systemBarsPadding().imePadding(),
+        state = rememberLazyListState(),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Тренажёр слуха", style = MaterialTheme.typography.headlineSmall)
-        Text(when (type) {
-            ExerciseType.MELODY -> "Слушай и подбери мелодию на гитаре."
-            ExerciseType.CHORDS -> "Слушай последовательность и подбери аккорды на гитаре."
-            ExerciseType.BOTH -> "Слушай две партии одновременно и подбери их на гитаре."
-        })
+        item(key = "title") {
+            Text("Тренажёр слуха", style = MaterialTheme.typography.headlineSmall)
+        }
+        item(key = "description") {
+            Text(when (type) {
+                ExerciseType.MELODY -> "Слушай и подбери мелодию на гитаре."
+                ExerciseType.CHORDS -> "Слушай последовательность и подбери аккорды на гитаре."
+                ExerciseType.BOTH -> "Слушай две партии одновременно и подбери их на гитаре."
+            })
+        }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp)) {
-                Text("Что будем подбирать?", style = MaterialTheme.typography.titleMedium)
-                Column {
-                    ExerciseType.entries.forEach { option ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = type == option, onClick = { changeType(option) })
-                            Text(option.label)
+        item(key = "mode") {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("Что будем подбирать?", style = MaterialTheme.typography.titleMedium)
+                    Column {
+                        ExerciseType.entries.forEach { option ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = type == option, onClick = { changeType(option) })
+                                Text(option.label)
+                            }
                         }
                     }
                 }
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Настройки упражнения", style = MaterialTheme.typography.titleMedium)
-                ChoiceField("Названия нот", notation.label, Notation.entries.map { it.label }) {
-                    notation = Notation.entries[it]
-                }
-                ChoiceField("Тоника", if (tonicIndex == -1) "Случайная" else tonicNames[tonicIndex],
-                    listOf("Случайная") + tonicNames) { tonicIndex = it - 1 }
-                ChoiceField("Лад", scale.label, scaleOptions.map { it.label }) { scale = scaleOptions[it] }
-                ChoiceField("Размер", "$meter/4", listOf("2/4", "3/4", "4/4")) { meter = it + 2 }
-                OutlinedTextField(
-                    value = barsText, onValueChange = { barsText = it },
-                    label = { Text("Тактов (1–16)") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = bpmText, onValueChange = { bpmText = it },
-                    label = { Text("Темп, BPM (40–240)") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (type != ExerciseType.CHORDS) {
-                    ChoiceField("Сложность", difficulty.label, Difficulty.entries.map { it.label }) {
-                        difficulty = Difficulty.entries[it]
+        item(key = "settings") {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Настройки упражнения", style = MaterialTheme.typography.titleMedium)
+                    ChoiceField("Названия нот", notation.label, Notation.entries.map { it.label }) {
+                        notation = Notation.entries[it]
                     }
-                }
-                if (type != ExerciseType.MELODY) {
-                    ChoiceField("Смена аккордов", chordLength.label, ChordLength.entries.map { it.label }) {
-                        chordLength = ChordLength.entries[it]
+                    ChoiceField("Тоника", if (tonicIndex == -1) "Случайная" else tonicNames[tonicIndex],
+                        listOf("Случайная") + tonicNames) { tonicIndex = it - 1 }
+                    ChoiceField("Лад", scale.label, scaleOptions.map { it.label }) { scale = scaleOptions[it] }
+                    ChoiceField("Размер", "$meter/4", listOf("2/4", "3/4", "4/4")) { meter = it + 2 }
+                    OutlinedTextField(
+                        value = barsText, onValueChange = { barsText = it },
+                        label = { Text("Тактов (1–16)") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = bpmText, onValueChange = { bpmText = it },
+                        label = { Text("Темп, BPM (40–240)") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (type != ExerciseType.CHORDS) {
+                        ChoiceField("Сложность", difficulty.label, Difficulty.entries.map { it.label }) {
+                            difficulty = Difficulty.entries[it]
+                        }
+                    }
+                    if (type != ExerciseType.MELODY) {
+                        ChoiceField("Смена аккордов", chordLength.label, ChordLength.entries.map { it.label }) {
+                            chordLength = ChordLength.entries[it]
+                        }
                     }
                 }
             }
         }
 
-        Button(
-            onClick = {
-                val bars = barsText.trim().toIntOrNull()
-                val bpm = bpmText.trim().toIntOrNull()
-                if (bars == null || bpm == null) {
-                    message = "Введи целые числа для количества тактов и BPM."
-                } else if (bars !in 1..16) {
-                    message = "Количество тактов должно быть от 1 до 16."
-                } else if (bpm !in 40..240) {
-                    message = "BPM должен быть от 40 до 240."
-                } else {
-                    val settings = ExerciseSettings(type, tonicIndex.takeIf { it >= 0 }, scale,
-                        meter, bars, bpm, difficulty, chordLength)
-                    generationJob?.cancel()
-                    player.stop()
-                    busy = true
-                    message = "Создаю упражнение…"
-                    generationJob = scope.launch {
-                        try {
-                            val (generated, rendered) = withContext(Dispatchers.Default) {
-                                val exercise = ExerciseEngine.generate(settings, Random())
-                                exercise to AudioEngine.render(exercise)
+        item(key = "generate") {
+            Button(
+                onClick = {
+                    val bars = barsText.trim().toIntOrNull()
+                    val bpm = bpmText.trim().toIntOrNull()
+                    if (bars == null || bpm == null) {
+                        message = "Введи целые числа для количества тактов и BPM."
+                    } else if (bars !in 1..16) {
+                        message = "Количество тактов должно быть от 1 до 16."
+                    } else if (bpm !in 40..240) {
+                        message = "BPM должен быть от 40 до 240."
+                    } else {
+                        val settings = ExerciseSettings(type, tonicIndex.takeIf { it >= 0 }, scale,
+                            meter, bars, bpm, difficulty, chordLength)
+                        generationJob?.cancel()
+                        player.stop()
+                        busy = true
+                        message = "Создаю упражнение…"
+                        generationJob = scope.launch {
+                            try {
+                                val (generated, rendered) = withContext(Dispatchers.Default) {
+                                    val exercise = ExerciseEngine.generate(settings, Random())
+                                    exercise to AudioEngine.render(exercise)
+                                }
+                                current = generated
+                                samples = rendered
+                                answerVisible = false
+                                busy = false
+                                message = when (generated.settings.type) {
+                                    ExerciseType.MELODY -> "Ответ скрыт. Попробуй напеть мелодию и найти её на гитаре."
+                                    ExerciseType.CHORDS -> "Ответ скрыт. Попробуй услышать бас и качество каждого аккорда."
+                                    ExerciseType.BOTH -> "Ответ скрыт. Попробуй сначала услышать аккорды, затем мелодию."
+                                }
+                                player.play(rendered) { message = it }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                busy = false
+                                message = error.message ?: "Не получилось создать упражнение."
                             }
-                            current = generated
-                            samples = rendered
-                            answerVisible = false
-                            busy = false
-                            message = when (generated.settings.type) {
-                                ExerciseType.MELODY -> "Ответ скрыт. Попробуй напеть мелодию и найти её на гитаре."
-                                ExerciseType.CHORDS -> "Ответ скрыт. Попробуй услышать бас и качество каждого аккорда."
-                                ExerciseType.BOTH -> "Ответ скрыт. Попробуй сначала услышать аккорды, затем мелодию."
-                            }
-                            player.play(rendered) { message = it }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (error: Exception) {
-                            busy = false
-                            message = error.message ?: "Не получилось создать упражнение."
                         }
                     }
-                }
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(when (type) {
-            ExerciseType.MELODY -> "Новая мелодия"
-            ExerciseType.CHORDS -> "Новые аккорды"
-            ExerciseType.BOTH -> "Новое упражнение"
-        }) }
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(when (type) {
+                ExerciseType.MELODY -> "Новая мелодия"
+                ExerciseType.CHORDS -> "Новые аккорды"
+                ExerciseType.BOTH -> "Новое упражнение"
+            }) }
+        }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        item(key = "playback") {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = {
+                    val audio = samples
+                    if (audio == null) message = "Сначала создай упражнение."
+                    else player.play(audio) { message = it }
+                }, modifier = Modifier.weight(1f), enabled = !busy) { Text("▶ Слушать ещё") }
+                OutlinedButton(onClick = { player.stop() }, modifier = Modifier.weight(1f)) { Text("■ Стоп") }
+            }
+        }
+        item(key = "reveal") {
             OutlinedButton(onClick = {
-                val audio = samples
-                if (audio == null) message = "Сначала создай упражнение."
-                else player.play(audio) { message = it }
-            }, modifier = Modifier.weight(1f), enabled = !busy) { Text("▶ Слушать ещё") }
-            OutlinedButton(onClick = { player.stop() }, modifier = Modifier.weight(1f)) { Text("■ Стоп") }
+                if (current == null) message = "Сначала создай упражнение."
+                else answerVisible = true
+            }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text("Показать ответ") }
         }
-        OutlinedButton(onClick = {
-            if (current == null) message = "Сначала создай упражнение."
-            else answerVisible = true
-        }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text("Показать ответ") }
 
-        val exercise = current
         if (exercise != null) {
-            val key = if (exercise.settings.tonic == null && !answerVisible) "Тональность скрыта"
-                else "${ExerciseEngine.pitchName(exercise.tonic, notation)} ${exercise.settings.scale.label}"
-            Text("${exercise.settings.type.label} · $key · ${exercise.settings.meter}/4 · " +
-                "${exercise.settings.bars} такт(ов) · ${exercise.settings.bpm} BPM")
+            item(key = "exercise-summary") {
+                val key = if (exercise.settings.tonic == null && !answerVisible) "Тональность скрыта"
+                    else "${ExerciseEngine.pitchName(exercise.tonic, notation)} ${exercise.settings.scale.label}"
+                Text("${exercise.settings.type.label} · $key · ${exercise.settings.meter}/4 · " +
+                    "${exercise.settings.bars} такт(ов) · ${exercise.settings.bpm} BPM")
+            }
         }
-        Text(message)
+        item(key = "message") { Text(message) }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
+        item(key = "answer") {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Text(answerText, modifier = Modifier.padding(14.dp))
+            }
+        }
+        item(key = "hint") {
             Text(
-                if (answerVisible && exercise != null) ExerciseEngine.answer(exercise, notation)
-                else "Ответ пока скрыт.",
-                modifier = Modifier.padding(14.dp),
+                when (type) {
+                    ExerciseType.MELODY -> "Легко: до 5 ступеней, четверти и половины. Обычно: до 7 ступеней и восьмые. Перед мелодией звучит такт счёта."
+                    ExerciseType.CHORDS -> "Звучат трезвучия в выбранном ладу. Каждый аккорд держится целый блок тактов; перед началом звучит такт счёта."
+                    ExerciseType.BOTH -> "Мелодия опирается на ноты текущего аккорда на сильных долях. Перед обеими партиями звучит такт счёта."
+                },
+                style = MaterialTheme.typography.bodySmall,
             )
         }
-        Text(
-            when (type) {
-                ExerciseType.MELODY -> "Легко: до 5 ступеней, четверти и половины. Обычно: до 7 ступеней и восьмые. Перед мелодией звучит такт счёта."
-                ExerciseType.CHORDS -> "Звучат трезвучия в выбранном ладу. Каждый аккорд держится целый блок тактов; перед началом звучит такт счёта."
-                ExerciseType.BOTH -> "Мелодия опирается на ноты текущего аккорда на сильных долях. Перед обеими партиями звучит такт счёта."
-            },
-            style = MaterialTheme.typography.bodySmall,
-        )
     }
 }
 
