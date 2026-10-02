@@ -49,6 +49,70 @@ class ExerciseEngineTest {
     }
 
     @Test
+    fun advancedChordsStayDiatonicAndUseControlledRegisters() {
+        for (difficulty in listOf(Difficulty.NORMAL, Difficulty.HARD)) {
+            val limit = if (difficulty == Difficulty.NORMAL) 12 else 18
+            for (scale in Scale.chordModes) {
+                for (tonic in 0..11) {
+                    repeat(20) { seed ->
+                        val settings = ExerciseSettings(ExerciseType.CHORDS, tonic, scale, 4, 8, 100,
+                            difficulty, ChordLength.EVERY_BAR)
+                        val chords = ExerciseEngine.generate(settings, Random(seed.toLong())).chords
+                        assertEquals(8, chords.sumOf { it.bars })
+                        assertTrue(chords.zipWithNext().all { (a, b) -> a.degree != b.degree &&
+                            kotlin.math.abs(a.midis.first() - b.midis.first()) <= limit })
+                        assertTrue((0 until chords.size - 3).all { index ->
+                            chords[index].degree != chords[index + 2].degree ||
+                                chords[index + 1].degree != chords[index + 3].degree
+                        })
+                        chords.forEach { chord ->
+                            assertTrue(ExerciseEngine.chordQuality(chord.midis) in
+                                setOf("major", "minor", "diminished"))
+                            val pitches = listOf(0, 2, 4).map { step ->
+                                (tonic + scale.steps[(chord.degree + step) % 7]) % 12
+                            }.toSet()
+                            assertEquals(pitches, chord.midis.map { it % 12 }.toSet())
+                            assertEquals(chord.midis.sorted(), chord.midis)
+                            assertTrue(chord.midis.first() in 40..68)
+                            assertTrue(chord.midis.last() <= 79)
+                            val bassDegree = (chord.degree + listOf(0, 2, 4)[chord.inversion]) % 7
+                            assertEquals((tonic + scale.steps[bassDegree]) % 12, chord.midis.first() % 12)
+                        }
+                        if (difficulty == Difficulty.NORMAL) assertTrue(chords.all { it.inversion == 0 })
+                        else assertTrue(chords.any { it.inversion != 0 })
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun advancedChordsCanStartAndEndOutsideTheTonic() {
+        for (difficulty in listOf(Difficulty.NORMAL, Difficulty.HARD)) {
+            for (scale in Scale.chordModes) {
+                val exercises = (0 until 40).map { seed ->
+                    val settings = ExerciseSettings(ExerciseType.CHORDS, 0, scale, 4, 8, 100,
+                        difficulty, ChordLength.EVERY_BAR)
+                    ExerciseEngine.generate(settings, Random(seed.toLong())).chords
+                }
+                assertTrue(exercises.any { it.first().degree != 0 })
+                assertTrue(exercises.any { it.last().degree != 0 })
+                assertTrue(exercises.any { chords -> chords.any { it.midis.first() !in 48..59 } })
+            }
+        }
+    }
+
+    @Test
+    fun inversionAnswerNamesTheRootAndBassSeparately() {
+        val settings = ExerciseSettings(ExerciseType.CHORDS, 0, Scale.MAJOR, 4, 1, 80,
+            Difficulty.HARD, ChordLength.EVERY_BAR)
+        val chord = ChordEvent(0, listOf(52, 55, 60), 1, 1)
+        val answer = ExerciseEngine.answer(Exercise(settings, 0, chords = listOf(chord)), Notation.LATIN)
+        assertTrue(answer.contains("C/E · 1-е обращение"))
+        assertEquals("major", ExerciseEngine.chordQuality(chord.midis))
+    }
+
+    @Test
     fun answerCanSwitchNotationWithoutChangingExercise() {
         val settings = ExerciseSettings(ExerciseType.CHORDS, 0, Scale.MAJOR, 4, 4, 80,
             Difficulty.EASY, ChordLength.EVERY_BAR)

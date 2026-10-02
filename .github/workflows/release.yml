@@ -59,11 +59,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Test and build APK
         working-directory: android
-        run: bash ./gradlew :app:testDebugUnitTest :app:assembleDebug "-PreleaseVersion=${GITHUB_REF_NAME#v}" --stacktrace
+        run: bash ./gradlew :app:testDebugUnitTest :app:assemblePreview "-PreleaseVersion=${GITHUB_REF_NAME#v}" --stacktrace
       - uses: actions/upload-artifact@v6
         with:
           name: android-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/preview/app-preview.apk
           if-no-files-found: error
 
   publish-release:
@@ -83,7 +83,7 @@ jobs:
           path: release-files
       - name: Publish release
         run: |
-          mv release-files/app-debug.apk release-files/MelodyEarTrainer-android-preview.apk
+          mv release-files/app-preview.apk release-files/MelodyEarTrainer-android-preview.apk
           gh release create "$RELEASE_TAG" \
             release-files/MelodyEarTrainer.exe \
             release-files/MelodyEarTrainer-android-preview.apk \

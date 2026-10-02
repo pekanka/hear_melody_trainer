@@ -37,8 +37,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Test and build APK
         working-directory: android
-        run: bash ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
+        run: bash ./gradlew :app:testDebugUnitTest :app:assemblePreview --stacktrace
       - uses: actions/upload-artifact@v6
         with:
           name: MelodyEarTrainer-android-preview
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/preview/app-preview.apk
