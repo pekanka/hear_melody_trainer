@@ -50,6 +50,7 @@ class ChordEvent:
     degree: int
     midis: tuple[int, int, int]
     bars: int
+    inversion: int = 0
 
 
 def pitch_name(pitch_class: int, notation: str) -> str:
@@ -118,13 +119,15 @@ def make_exercise(
 
 
 def make_chord_exercise(
-    tonic: int, mode: str, bars: int, chord_length: str, rng: random.Random
+    tonic: int, mode: str, bars: int, chord_length: str, rng: random.Random, level: str = "Легко"
 ) -> list[ChordEvent]:
     """Собирает последовательность диатонических трезвучий целыми тактами."""
     if not 0 <= tonic < 12 or mode not in CHORD_MODES or not 1 <= bars <= 16:
         raise ValueError("Недопустимые параметры упражнения")
     if chord_length not in CHORD_LENGTH_OPTIONS:
         raise ValueError("Недопустимая длительность аккорда")
+    if level not in ("Легко", "Обычно", "Сложнее"):
+        raise ValueError("Недопустимая сложность")
 
     anchor = 48 + tonic  # C3–B3: корни аккордов остаются в гитарном диапазоне.
     scale = SCALES[mode]
@@ -145,6 +148,10 @@ def make_chord_exercise(
         durations.append(length)
         remaining -= length
 
+    if level != "Легко":
+        return _make_varied_chords(anchor, scale, mode, durations, level, rng)
+
+    # Старый алгоритм лёгкого уровня: та же последовательность и те же вызовы RNG.
     result: list[ChordEvent] = []
     previous = -1
     for index, length in enumerate(durations):
@@ -164,6 +171,91 @@ def make_chord_exercise(
             )
         )
         previous = degree
+    return result
+
+
+def _make_varied_chords(
+    anchor: int, scale: tuple[int, ...], mode: str, durations: list[int],
+    level: str, rng: random.Random,
+) -> list[ChordEvent]:
+    """Связные ступени; регистр выбирается по движению баса и голосов."""
+    if mode == "мажор":
+        starts = (0, 0, 3, 4, 5)
+        next_degrees = (
+            (3, 4, 5, 1), (4, 4, 0, 5, 6), (5, 3, 1),
+            (0, 4, 1, 4), (0, 0, 5, 3), (3, 1, 4, 0), (0, 2, 4),
+        )
+    else:
+        starts = (0, 0, 3, 5, 6)
+        next_degrees = (
+            (3, 5, 6, 4, 2), (4, 0), (5, 6, 3, 0),
+            (0, 6, 4, 5), (0, 0, 5, 3), (2, 6, 3, 0), (0, 2, 5, 3),
+        )
+
+    def scale_midi(index: int) -> int:
+        octave, degree = divmod(index, 7)
+        return anchor + 12 * octave + scale[degree]
+
+    result: list[ChordEvent] = []
+    degree = rng.choice(starts)
+    for index, length in enumerate(durations):
+        if index:
+            options = next_degrees[degree]
+            if len(result) >= 3 and result[-3].degree == result[-1].degree:
+                varied = tuple(next_degree for next_degree in options
+                               if next_degree != result[-2].degree)
+                if varied:
+                    options = varied
+            degree = rng.choice(options)
+        root = scale_midi(degree)
+        third = scale_midi(degree + 2) - root
+        fifth = scale_midi(degree + 4) - root
+        candidates: list[tuple[int, tuple[int, int, int]]] = []
+        for shift in (-24, -12, 0, 12):
+            base = root + shift
+            voicings = (
+                (base, base + third, base + fifth),
+                (base + third, base + fifth, base + 12),
+                (base + fifth, base + 12, base + 12 + third),
+            )
+            for inversion, midis in enumerate(voicings[:1 if level == "Обычно" else 3]):
+                low, high = (43, 64) if level == "Обычно" else (40, 68)
+                if low <= midis[0] <= high and midis[-1] <= 79:
+                    candidates.append((inversion, midis))
+
+        if level == "Сложнее" and index == len(durations) - 1 and len(durations) > 1 \
+                and all(chord.inversion == 0 for chord in result):
+            candidates = [candidate for candidate in candidates if candidate[0] != 0]
+        if level == "Обычно" and len(durations) >= 4 and index == len(durations) // 2 \
+                and all(anchor <= chord.midis[0] < anchor + 12 for chord in result):
+            outside = [candidate for candidate in candidates
+                       if not anchor <= candidate[1][0] < anchor + 12
+                       and abs(candidate[1][0] - result[-1].midis[0]) <= 12]
+            if outside:
+                candidates = outside
+
+        previous = result[-1].midis if result else None
+        if previous is not None:
+            limit = 12 if level == "Обычно" else 18
+            nearby = [candidate for candidate in candidates
+                      if abs(candidate[1][0] - previous[0]) <= limit]
+            if nearby:
+                candidates = nearby
+        weights: list[int] = []
+        for inversion, midis in candidates:
+            if previous is None:
+                weight = max(1, 11 - abs(midis[0] - 54))
+            else:
+                bass_motion = abs(midis[0] - previous[0])
+                voice_motion = sum(abs(a - b) for a, b in zip(midis, previous))
+                weight = max(1, 12 - bass_motion) * (3 if voice_motion <= 15 else 2 if voice_motion <= 27 else 1)
+            if level == "Сложнее":
+                weight *= (5, 4, 2)[inversion]
+            if index and not anchor <= midis[0] < anchor + 12:
+                weight *= 2
+            weights.append(weight)
+        inversion, midis = rng.choices(candidates, weights=weights, k=1)[0]
+        result.append(ChordEvent(degree, midis, length, inversion))
     return result
 
 
@@ -211,17 +303,27 @@ def make_accompanied_melody(
     return result
 
 
+def _triad_identity(midis: tuple[int, int, int]) -> tuple[int, str]:
+    qualities = {(0, 4, 7): "major", (0, 3, 7): "minor", (0, 3, 6): "diminished"}
+    for root in midis:
+        intervals = tuple(sorted((note - root) % 12 for note in midis))
+        if intervals in qualities:
+            return root % 12, qualities[intervals]
+    raise ValueError("Неизвестное трезвучие")
+
+
 def chord_quality(midis: tuple[int, int, int]) -> str:
-    intervals = (midis[1] - midis[0], midis[2] - midis[0])
-    return {(4, 7): "major", (3, 7): "minor", (3, 6): "diminished"}[intervals]
+    return _triad_identity(midis)[1]
 
 
 def chord_name(chord: ChordEvent, notation: str) -> str:
-    root = pitch_name(chord.midis[0], notation)
-    quality = chord_quality(chord.midis)
+    root_pc, quality = _triad_identity(chord.midis)
+    root = pitch_name(root_pc, notation)
     if notation == NOTATION_OPTIONS[1]:
-        return root + {"major": "", "minor": "m", "diminished": "dim"}[quality]
-    return root + {"major": " маж.", "minor": " мин.", "diminished": " ум."}[quality]
+        name = root + {"major": "", "minor": "m", "diminished": "dim"}[quality]
+    else:
+        name = root + {"major": " маж.", "minor": " мин.", "diminished": " ум."}[quality]
+    return f"{name}/{pitch_name(chord.midis[0], notation)}" if chord.inversion else name
 
 
 def make_wav(path: Path, exercise: list[list[Event]], bpm: int, numerator: int) -> None:
@@ -490,9 +592,10 @@ class Trainer(tk.Tk):
             self.heading_var.set("Подбери аккорды на слух")
             self.description_var.set("Слушай последовательность и найди аккорды на гитаре.")
             self.new_button.configure(text="Новые аккорды")
-            self.level_combo.configure(state="disabled")
-            self.hint_var.set("Звучат трезвучия в выбранном ладу. Каждый аккорд держится целый блок тактов; "
-                              "перед началом звучит один такт счёта.")
+            self.level_combo.configure(state="readonly")
+            self.hint_var.set("Легко: аккорды в одном регистре, начало на I ступени. "
+                              "Обычно: разные регистры и связные переходы. "
+                              "Сложнее: шире диапазон и обращения трезвучий.")
         elif selected == "Вместе":
             self.heading_var.set("Подбери аккорды и мелодию")
             self.description_var.set("Слушай две партии одновременно и подбери их на гитаре.")
@@ -554,7 +657,9 @@ class Trainer(tk.Tk):
             self.stop()
             self.random_key = random_key
             if self.exercise_var.get() == "Аккорды":
-                self.chords = make_chord_exercise(tonic, mode, bars, self.chord_length_var.get(), self.rng)
+                self.chords = make_chord_exercise(
+                    tonic, mode, bars, self.chord_length_var.get(), self.rng, self.level_var.get()
+                )
                 make_chord_wav(self.audio_path, self.chords, bpm, meter)
                 self.exercise = None
                 self._set_answer("Ответ пока скрыт. Попробуй услышать басовую ноту и качество каждого аккорда.")
@@ -607,11 +712,15 @@ class Trainer(tk.Tk):
                     roman = roman.lower()
                 if quality == "diminished":
                     roman += "°"
+                inversion = ("", " · 1-е обращение", " · 2-е обращение")[chord.inversion]
                 bar_label = str(bar_number) if chord.bars == 1 else f"{bar_number}–{bar_number + chord.bars - 1}"
                 tones = " – ".join(note_name(midi, notation) for midi in chord.midis)
-                lines.append(f"Такт(ы) {bar_label}:  {roman} · {chord_name(chord, notation)} · {tones}")
+                lines.append(f"Такт(ы) {bar_label}:  {roman} · {chord_name(chord, notation)}{inversion} · {tones}")
                 bar_number += chord.bars
-            lines.extend(["", "Ступень указана римской цифрой; «°» означает уменьшённое трезвучие."])
+            explanation = "Ступень указана римской цифрой; «°» означает уменьшённое трезвучие."
+            if any(chord.inversion for chord in self.chords):
+                explanation += " После / указана басовая нота обращения."
+            lines.extend(["", explanation])
         if self.exercise is not None:
             if self.chords is not None:
                 lines.extend(["", "Мелодия:", ""])

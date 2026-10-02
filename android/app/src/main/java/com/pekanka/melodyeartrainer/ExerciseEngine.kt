@@ -38,7 +38,7 @@ data class ExerciseSettings(
 )
 
 data class NoteEvent(val midi: Int, val eighths: Int)
-data class ChordEvent(val degree: Int, val midis: List<Int>, val bars: Int)
+data class ChordEvent(val degree: Int, val midis: List<Int>, val bars: Int, val inversion: Int = 0)
 
 data class Exercise(
     val settings: ExerciseSettings,
@@ -127,6 +127,10 @@ object ExerciseEngine {
             durations += length
             remaining -= length
         }
+        if (settings.type == ExerciseType.CHORDS && settings.difficulty != Difficulty.EASY) {
+            return makeVariedChords(anchor, settings.scale, durations, settings.difficulty, random)
+        }
+        // Лёгкий уровень и совместный режим сохраняют прежнюю генерацию аккордов.
         var previous = -1
         return durations.mapIndexed { index, length ->
             val degree = if (index == 0 || (index == durations.lastIndex && durations.size > 2)) {
@@ -140,6 +144,98 @@ object ExerciseEngine {
             previous = degree
             ChordEvent(degree, listOf(scaleMidi(degree), scaleMidi(degree + 2), scaleMidi(degree + 4)), length)
         }
+    }
+
+    private fun makeVariedChords(
+        anchor: Int, scale: Scale, durations: List<Int>, difficulty: Difficulty, random: Random,
+    ): List<ChordEvent> {
+        val starts: List<Int>
+        val nextDegrees: List<List<Int>>
+        if (scale == Scale.MAJOR) {
+            starts = listOf(0, 0, 3, 4, 5)
+            nextDegrees = listOf(
+                listOf(3, 4, 5, 1), listOf(4, 4, 0, 5, 6), listOf(5, 3, 1),
+                listOf(0, 4, 1, 4), listOf(0, 0, 5, 3), listOf(3, 1, 4, 0), listOf(0, 2, 4),
+            )
+        } else {
+            starts = listOf(0, 0, 3, 5, 6)
+            nextDegrees = listOf(
+                listOf(3, 5, 6, 4, 2), listOf(4, 0), listOf(5, 6, 3, 0),
+                listOf(0, 6, 4, 5), listOf(0, 0, 5, 3), listOf(2, 6, 3, 0), listOf(0, 2, 5, 3),
+            )
+        }
+        fun scaleMidi(index: Int): Int = anchor + 12 * (index / 7) + scale.steps[index % 7]
+
+        val result = mutableListOf<ChordEvent>()
+        var degree = starts[random.nextInt(starts.size)]
+        durations.forEachIndexed { index, length ->
+            if (index > 0) {
+                var options = nextDegrees[degree]
+                if (result.size >= 3 && result[result.size - 3].degree == result.last().degree) {
+                    val varied = options.filter { it != result[result.size - 2].degree }
+                    if (varied.isNotEmpty()) options = varied
+                }
+                degree = options[random.nextInt(options.size)]
+            }
+            val root = scaleMidi(degree)
+            val third = scaleMidi(degree + 2) - root
+            val fifth = scaleMidi(degree + 4) - root
+            var candidates = mutableListOf<Pair<Int, List<Int>>>()
+            for (shift in listOf(-24, -12, 0, 12)) {
+                val base = root + shift
+                val voicings = listOf(
+                    listOf(base, base + third, base + fifth),
+                    listOf(base + third, base + fifth, base + 12),
+                    listOf(base + fifth, base + 12, base + 12 + third),
+                )
+                val count = if (difficulty == Difficulty.NORMAL) 1 else 3
+                for (inversion in 0 until count) {
+                    val midis = voicings[inversion]
+                    val low = if (difficulty == Difficulty.NORMAL) 43 else 40
+                    val high = if (difficulty == Difficulty.NORMAL) 64 else 68
+                    if (midis.first() in low..high && midis.last() <= 79) {
+                        candidates += inversion to midis
+                    }
+                }
+            }
+            if (difficulty == Difficulty.HARD && index == durations.lastIndex && durations.size > 1 &&
+                result.all { it.inversion == 0 }) {
+                candidates = candidates.filter { it.first != 0 }.toMutableList()
+            }
+            if (difficulty == Difficulty.NORMAL && durations.size >= 4 && index == durations.size / 2 &&
+                result.all { it.midis.first() in anchor until anchor + 12 }) {
+                val outside = candidates.filter { (_, midis) ->
+                    midis.first() !in anchor until anchor + 12 &&
+                        abs(midis.first() - result.last().midis.first()) <= 12
+                }
+                if (outside.isNotEmpty()) candidates = outside.toMutableList()
+            }
+            val previous = result.lastOrNull()?.midis
+            if (previous != null) {
+                val limit = if (difficulty == Difficulty.NORMAL) 12 else 18
+                val nearby = candidates.filter { (_, midis) -> abs(midis.first() - previous.first()) <= limit }
+                if (nearby.isNotEmpty()) candidates = nearby.toMutableList()
+            }
+            val weights = candidates.map { (inversion, midis) ->
+                var weight = if (previous == null) {
+                    maxOf(1, 11 - abs(midis.first() - 54))
+                } else {
+                    val bassMotion = abs(midis.first() - previous.first())
+                    val voiceMotion = midis.zip(previous).sumOf { (a, b) -> abs(a - b) }
+                    maxOf(1, 12 - bassMotion) * when {
+                        voiceMotion <= 15 -> 3
+                        voiceMotion <= 27 -> 2
+                        else -> 1
+                    }
+                }
+                if (difficulty == Difficulty.HARD) weight *= listOf(5, 4, 2)[inversion]
+                if (index > 0 && midis.first() !in anchor until anchor + 12) weight *= 2
+                weight
+            }
+            val (inversion, midis) = candidates[weightedIndex(weights, random)]
+            result += ChordEvent(degree, midis, length, inversion)
+        }
+        return result
     }
 
     private fun makeAccompaniedMelody(
@@ -195,12 +291,21 @@ object ExerciseEngine {
     fun noteName(midi: Int, notation: Notation): String =
         "${pitchName(midi, notation)}${midi / 12 - 1}"
 
-    fun chordQuality(midis: List<Int>): String = when (listOf(midis[1] - midis[0], midis[2] - midis[0])) {
-        listOf(4, 7) -> "major"
-        listOf(3, 7) -> "minor"
-        listOf(3, 6) -> "diminished"
-        else -> error("Неизвестное трезвучие")
+    private fun triadIdentity(midis: List<Int>): Pair<Int, String> {
+        for (root in midis) {
+            val intervals = midis.map { (it - root).mod(12) }.sorted()
+            val quality = when (intervals) {
+                listOf(0, 4, 7) -> "major"
+                listOf(0, 3, 7) -> "minor"
+                listOf(0, 3, 6) -> "diminished"
+                else -> null
+            }
+            if (quality != null) return root.mod(12) to quality
+        }
+        error("Неизвестное трезвучие")
     }
+
+    fun chordQuality(midis: List<Int>): String = triadIdentity(midis).second
 
     fun answer(exercise: Exercise, notation: Notation): String = buildString {
         appendLine("Тональность: ${pitchName(exercise.tonic, notation)} ${exercise.settings.scale.label}")
@@ -209,21 +314,25 @@ object ExerciseEngine {
         if (exercise.settings.type != ExerciseType.MELODY) {
             var barNumber = 1
             exercise.chords.forEach { chord ->
-                val quality = chordQuality(chord.midis)
+                val (rootPitchClass, quality) = triadIdentity(chord.midis)
                 var roman = listOf("I", "II", "III", "IV", "V", "VI", "VII")[chord.degree]
                 if (quality != "major") roman = roman.lowercase()
                 if (quality == "diminished") roman += "°"
-                val root = pitchName(chord.midis.first(), notation)
+                val root = pitchName(rootPitchClass, notation)
                 val chordName = if (notation == Notation.LATIN) {
                     root + mapOf("major" to "", "minor" to "m", "diminished" to "dim").getValue(quality)
                 } else {
                     root + mapOf("major" to " маж.", "minor" to " мин.", "diminished" to " ум.").getValue(quality)
                 }
+                val namedChord = if (chord.inversion == 0) chordName
+                    else "$chordName/${pitchName(chord.midis.first(), notation)}"
+                val inversion = listOf("", " · 1-е обращение", " · 2-е обращение")[chord.inversion]
                 val label = if (chord.bars == 1) "$barNumber" else "$barNumber–${barNumber + chord.bars - 1}"
-                appendLine("Такт(ы) $label:  $roman · $chordName · ${chord.midis.joinToString(" – ") { noteName(it, notation) }}")
+                appendLine("Такт(ы) $label:  $roman · $namedChord$inversion · ${chord.midis.joinToString(" – ") { noteName(it, notation) }}")
                 barNumber += chord.bars
             }
             append("\nСтупень указана римской цифрой; «°» означает уменьшённое трезвучие.")
+            if (exercise.chords.any { it.inversion != 0 }) append(" После / указана басовая нота обращения.")
         }
         if (exercise.settings.type == ExerciseType.BOTH) append("\n\nМелодия:\n\n")
         if (exercise.settings.type != ExerciseType.CHORDS) {

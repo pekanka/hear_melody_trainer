@@ -162,10 +162,8 @@ private fun TrainerScreen() {
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    if (type != ExerciseType.CHORDS) {
-                        ChoiceField("Сложность", difficulty.label, Difficulty.entries.map { it.label }) {
-                            difficulty = Difficulty.entries[it]
-                        }
+                    ChoiceField("Сложность", difficulty.label, Difficulty.entries.map { it.label }) {
+                        difficulty = Difficulty.entries[it]
                     }
                     if (type != ExerciseType.MELODY) {
                         ChoiceField("Смена аккордов", chordLength.label, ChordLength.entries.map { it.label }) {
@@ -264,7 +262,7 @@ private fun TrainerScreen() {
             Text(
                 when (type) {
                     ExerciseType.MELODY -> "Легко: до 5 ступеней, четверти и половины. Обычно: до 7 ступеней и восьмые. Перед мелодией звучит такт счёта."
-                    ExerciseType.CHORDS -> "Звучат трезвучия в выбранном ладу. Каждый аккорд держится целый блок тактов; перед началом звучит такт счёта."
+                    ExerciseType.CHORDS -> "Легко: один регистр, начало на I ступени. Обычно: разные регистры и связные переходы. Сложнее: шире диапазон и обращения трезвучий."
                     ExerciseType.BOTH -> "Мелодия опирается на ноты текущего аккорда на сильных долях. Перед обеими партиями звучит такт счёта."
                 },
                 style = MaterialTheme.typography.bodySmall,
